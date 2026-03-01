@@ -3,7 +3,7 @@ import os
 import aiohttp
 import logging
 import time
-from threading import Thread
+import threading
 from datetime import datetime
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
@@ -11,6 +11,7 @@ from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.types import ParseMode
 from aiogram.utils import executor
 from bs4 import BeautifulSoup
+from aiohttp import web
 
 # ===================== НАСТРОЙКИ =====================
 load_dotenv()
@@ -18,39 +19,60 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не найден в .env файле")
 
-# ===================== ИНИЦИАЛИЗАЦИЯ =====================
+# ===================== МИКРО-ВЕБ СЕРВЕР ДЛЯ ПИНГОВ =====================
+async def handle_ping(request):
+    return web.Response(text="pong", status=200)
+
+async def handle_health(request):
+    return web.Response(text="healthy", status=200)
+
+async def start_web_server():
+    """Запускает веб-сервер для приема пингов"""
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    app.router.add_get('/health', handle_health)
+    app.router.add_get('/ping', handle_ping)
+    
+    port = int(os.environ.get('PORT', 10000))
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"🌐 Веб-сервер для пингов запущен на порту {port}")
+
+# ===================== ИНИЦИАЛИЗАЦИЯ БОТА =====================
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 dp.middleware.setup(LoggingMiddleware())
 
-# ===================== АВТОПИНГЕР ДЛЯ RENDER =====================
+# ===================== АВТОПИНГЕР (ИСПРАВЛЕННЫЙ) =====================
 class SelfPinger:
-    def __init__(self, url, interval_minutes=10):
+    def __init__(self, url, interval_minutes=10, loop=None):
         self.url = url
-        self.interval = interval_minutes * 60  # в секунды
+        self.interval = interval_minutes * 60
         self.running = True
         self.logger = logging.getLogger('SelfPinger')
+        self.loop = loop or asyncio.get_event_loop()
         
     def start(self):
-        thread = Thread(target=self._ping_loop, daemon=True)
-        thread.start()
-        self.logger.info(f"✅ Автопингер запущен для {self.url}, интервал {self.interval//60} минут")
+        """Запускает пингер в том же event loop'е"""
+        self.loop.create_task(self._ping_loop())
+        self.logger.info(f"✅ Автопингер запущен для {self.url}")
     
-    def _ping_loop(self):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
+    async def _ping_loop(self):
+        """Асинхронный цикл пинга (без потоков!)"""
         while self.running:
             try:
-                response = loop.run_until_complete(self._ping())
+                response = await self._ping()
                 if response and response.status == 200:
-                    self.logger.info(f"✅ Пинг успешен: {response.status} в {datetime.now().strftime('%H:%M:%S')}")
+                    self.logger.info(f"✅ Пинг успешен: {response.status}")
                 else:
                     self.logger.warning(f"⚠️ Пинг вернул статус: {response.status if response else 'None'}")
             except Exception as e:
                 self.logger.error(f"❌ Ошибка пинга: {e}")
             
-            time.sleep(self.interval)
+            await asyncio.sleep(self.interval)
     
     async def _ping(self):
         async with aiohttp.ClientSession() as session:
@@ -60,19 +82,21 @@ class SelfPinger:
             except Exception as e:
                 self.logger.error(f"Ошибка соединения: {e}")
                 return None
-    
-    def stop(self):
-        self.running = False
 
-# Запускаем автопингер если есть URL
-RENDER_URL = os.environ.get('RENDER_EXTERNAL_URL')
-if RENDER_URL:
-    pinger = SelfPinger(RENDER_URL, interval_minutes=10)
-    pinger.start()
-    print(f"🔄 Автопингер активирован для {RENDER_URL}")
-else:
-    print("⚠️ RENDER_EXTERNAL_URL не найден. Автопинг не работает.")
-    print("💡 Добавь переменную RENDER_EXTERNAL_URL в настройках Render")
+# ===================== ОСНОВНАЯ ФУНКЦИЯ =====================
+async def main():
+    # Запускаем веб-сервер
+    await start_web_server()
+    
+    # Запускаем автопингер если есть URL
+    RENDER_URL = os.environ.get('RENDER_EXTERNAL_URL')
+    if RENDER_URL:
+        pinger = SelfPinger(RENDER_URL, interval_minutes=10, loop=asyncio.get_running_loop())
+        pinger.start()
+        print(f"🔄 Автопингер активирован для {RENDER_URL}")
+    
+    # Запускаем бота
+    await dp.start_polling()
 
 # ===================== ПОИСК НА GITHUB =====================
 async def search_github(query: str, limit: int = 5):
@@ -223,4 +247,4 @@ async def cmd_apk(message: types.Message):
 
 # ===================== ЗАПУСК =====================
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
