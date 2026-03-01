@@ -1,11 +1,15 @@
 import asyncio
 import os
+import aiohttp
+import logging
+import time
+from threading import Thread
+from datetime import datetime
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.types import ParseMode
 from aiogram.utils import executor
-import aiohttp
 from bs4 import BeautifulSoup
 
 # ===================== НАСТРОЙКИ =====================
@@ -18,6 +22,57 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 dp.middleware.setup(LoggingMiddleware())
+
+# ===================== АВТОПИНГЕР ДЛЯ RENDER =====================
+class SelfPinger:
+    def __init__(self, url, interval_minutes=10):
+        self.url = url
+        self.interval = interval_minutes * 60  # в секунды
+        self.running = True
+        self.logger = logging.getLogger('SelfPinger')
+        
+    def start(self):
+        thread = Thread(target=self._ping_loop, daemon=True)
+        thread.start()
+        self.logger.info(f"✅ Автопингер запущен для {self.url}, интервал {self.interval//60} минут")
+    
+    def _ping_loop(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        while self.running:
+            try:
+                response = loop.run_until_complete(self._ping())
+                if response and response.status == 200:
+                    self.logger.info(f"✅ Пинг успешен: {response.status} в {datetime.now().strftime('%H:%M:%S')}")
+                else:
+                    self.logger.warning(f"⚠️ Пинг вернул статус: {response.status if response else 'None'}")
+            except Exception as e:
+                self.logger.error(f"❌ Ошибка пинга: {e}")
+            
+            time.sleep(self.interval)
+    
+    async def _ping(self):
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(self.url, timeout=10) as resp:
+                    return resp
+            except Exception as e:
+                self.logger.error(f"Ошибка соединения: {e}")
+                return None
+    
+    def stop(self):
+        self.running = False
+
+# Запускаем автопингер если есть URL
+RENDER_URL = os.environ.get('RENDER_EXTERNAL_URL')
+if RENDER_URL:
+    pinger = SelfPinger(RENDER_URL, interval_minutes=10)
+    pinger.start()
+    print(f"🔄 Автопингер активирован для {RENDER_URL}")
+else:
+    print("⚠️ RENDER_EXTERNAL_URL не найден. Автопинг не работает.")
+    print("💡 Добавь переменную RENDER_EXTERNAL_URL в настройках Render")
 
 # ===================== ПОИСК НА GITHUB =====================
 async def search_github(query: str, limit: int = 5):
@@ -36,7 +91,6 @@ async def search_github(query: str, limit: int = 5):
                 description = repo['description'] or 'Нет описания'
                 stars = repo['stargazers_count']
                 lang = repo['language'] or 'Unknown'
-                # Проверяем наличие релиза с APK
                 releases_url = f"https://api.github.com/repos/{full_name}/releases/latest"
                 async with session.get(releases_url) as rel_resp:
                     apk_url = None
@@ -69,7 +123,6 @@ async def search_apkmirror(query: str, limit: int = 5):
                 return []
             html = await resp.text()
             soup = BeautifulSoup(html, 'html.parser')
-            # Селекторы для APKMirror
             items = soup.select('.appRow')
             for item in items[:limit]:
                 title_tag = item.select_one('.appRowTitle a')
