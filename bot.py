@@ -86,7 +86,7 @@ async def send_card(chat_id, title, text, url=None, apk_url=None):
 @dp.message_handler(commands=['start'])
 async def cmd_start(message: types.Message):
     text = (
-        "🔥 <b>МУСОР КИЛЛЕР 3000</b> 🔥\n\n"
+        "🔥 <b>GitHubFinder</b> 🔥\n\n"
         "Ищи софт и APK мгновенно:\n\n"
         "• /git [запрос] — GitHub\n"
         "• /apk [запрос] — APKMirror\n\n"
