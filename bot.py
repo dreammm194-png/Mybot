@@ -39,13 +39,8 @@ async def search_github(query: str) -> List[Dict]:
     except Exception as e:
         logger.error(f"Ошибка в github_api.search_github: {e}")
     return results
-```
 
----
 
-## bot/utils/weather_api.py
-
-```python
 import aiohttp
 import logging
 from typing import Dict, Optional
@@ -101,13 +96,8 @@ async def get_weather(city: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Ошибка в weather_api.get_weather: {e}")
     return None
-```
 
----
 
-## bot/utils/apk_parser.py
-
-```python
 import aiohttp
 import logging
 from bs4 import BeautifulSoup
@@ -242,13 +232,8 @@ async def search_trashbox(query: str) -> List[Dict]:
     
     _set_cache(f"trash:{query}", results)
     return results
-```
 
----
 
-## bot/config.py
-
-```python
 import os
 import logging
 from dataclasses import dataclass, field
@@ -268,13 +253,8 @@ class Config:
     PORT: int = field(default_factory=lambda: int(os.getenv("PORT", "10000")))
 
 config = Config()
-```
 
----
 
-## bot/keyboards/reply_kb.py
-
-```python
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
@@ -290,13 +270,8 @@ def get_cancel_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[[KeyboardButton(text="❌ Отмена")]],
         resize_keyboard=True
     )
-```
 
----
 
-## bot/handlers/start.py
-
-```python
 import logging
 from aiogram import Router, F
 from aiogram.types import Message
