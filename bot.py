@@ -1,198 +1,432 @@
-import asyncio
-import os
+## bot/utils/github_api.py
+
+```python
 import aiohttp
-import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.exceptions import MessageNotModified
+from typing import List, Dict
+from bot.config import config
+
+async def search_github(query: str) -> List[Dict]:
+    url = f"https://api.github.com/search/repositories?q={query}&sort=stars&order=desc&per_page=5"
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    if config.GITHUB_TOKEN:
+        headers["Authorization"] = f"token {config.GITHUB_TOKEN}"
+    
+    results = []
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for item in data.get("items", [])[:5]:
+                        results.append({
+                            "name": item.get("full_name", "N/A"),
+                            "stars": item.get("stargazers_count", 0),
+                            "desc": item.get("description", "Нет описания")[:100],
+                            "url": item.get("html_url", ""),
+                            "lang": item.get("language", "N/A")
+                        })
+    except:
+        pass
+    return results
+```
+
+---
+
+## bot/utils/weather_api.py
+
+```python
+import aiohttp
+from typing import Dict, Optional
+from bot.config import config
+
+async def get_weather(city: str) -> Optional[Dict]:
+    if not config.OPENWEATHER_API_KEY:
+        return None
+    
+    url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={config.OPENWEATHER_API_KEY}&units=metric&lang=ru"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return {
+                        "city": data.get("name", city),
+                        "temp": data["main"]["temp"],
+                        "feels": data["main"]["feels_like"],
+                        "desc": data["weather"][0]["description"].capitalize(),
+                        "humidity": data["main"]["humidity"],
+                        "wind": data["wind"]["speed"]
+                    }
+    except:
+        pass
+    return None
+```
+
+---
+
+## bot/utils/apk_parser.py
+
+```python
+import aiohttp
 from bs4 import BeautifulSoup
-from aiohttp import web
+from typing import List, Dict
+import urllib.parse
+import time
+
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'ru-RU,ru;q=0.9',
+}
+
+_cache: Dict[str, tuple] = {}
+CACHE_TTL = 300
+
+def _get_cache(key: str):
+    if key in _cache:
+        data, ts = _cache[key]
+        if time.time() - ts < CACHE_TTL:
+            return data
+        del _cache[key]
+    return None
+
+def _set_cache(key: str, data):
+    _cache[key] = (data, time.time())
+
+async def search_apkmirror(query: str) -> List[Dict]:
+    cached = _get_cache(f"apk:{query}")
+    if cached:
+        return cached
+    
+    url = f"https://www.apkmirror.com/?post_type=app_release&searchtype=apk&s={urllib.parse.quote(query)}"
+    results = []
+    
+    try:
+        async with aiohttp.ClientSession(headers=HEADERS) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    return results
+                html = await resp.text()
+        
+        soup = BeautifulSoup(html, 'lxml')
+        for row in soup.find_all('div', class_='appRow')[:8]:
+            title_elem = row.find('a', class_='appRowTitle')
+            if not title_elem:
+                continue
+            title = title_elem.get_text(strip=True)
+            link = title_elem.get('href', '')
+            if link and not link.startswith('http'):
+                link = 'https://www.apkmirror.com' + link
+            ver_elem = row.find('div', class_='appRowVersion')
+            version = ver_elem.get_text(strip=True) if ver_elem else 'N/A'
+            if title and link:
+                results.append({'title': title, 'version': version, 'link': link})
+    except:
+        pass
+    
+    _set_cache(f"apk:{query}", results)
+    return results
+
+async def search_trashbox(query: str) -> List[Dict]:
+    cached = _get_cache(f"trash:{query}")
+    if cached:
+        return cached
+    
+    url = f"https://trashbox.ru/search?query={urllib.parse.quote(query)}"
+    results = []
+    
+    try:
+        async with aiohttp.ClientSession(headers=HEADERS) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    return results
+                html = await resp.text()
+        
+        soup = BeautifulSoup(html, 'lxml')
+        items = soup.find_all('div', class_='catalog_item') or soup.find_all('li', class_='search-item')
+        
+        for item in items[:8]:
+            title_elem = item.find('a', class_='name') or item.find('a', class_='search-link')
+            if not title_elem:
+                continue
+            title = title_elem.get_text(strip=True)
+            link = title_elem.get('href', '')
+            if link and not link.startswith('http'):
+                link = 'https://trashbox.ru' + link
+            ver_elem = item.find('span', class_='version') or item.find('span', class_='app_ver')
+            version = ver_elem.get_text(strip=True) if ver_elem else 'N/A'
+            if title and link:
+                results.append({'title': title, 'version': version, 'link': link})
+    except:
+        pass
+    
+    _set_cache(f"trash:{query}", results)
+    return results
+```
+
+---
+
+## bot/config.py
+
+```python
+import os
+from dataclasses import dataclass
 from dotenv import load_dotenv
 
 load_dotenv()
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
 
-logging.basicConfig(level=logging.INFO)
+@dataclass
+class Config:
+    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+    GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
+    OPENWEATHER_API_KEY: str = os.getenv("OPENWEATHER_API_KEY", "")
+    NEWS_API_KEY: str = os.getenv("NEWS_API_KEY", "")
+    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
+    PORT: int = int(os.getenv("PORT", "10000"))
 
-user_state = {}
+config = Config()
+```
 
-async def send_styled_message(chat_id, text, reply_markup=None, reply_to=None):
-    await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=reply_markup, reply_to_message_id=reply_to, disable_web_page_preview=True)
+---
 
-async def search_github(query: str, limit: int = 6):
-    url = 'https://api.github.com/search/repositories'
-    params = {'q': query, 'sort': 'stars', 'order': 'desc', 'per_page': limit}
-    results = []
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params) as resp:
-            if resp.status != 200: return []
-            data = await resp.json()
-            for repo in data.get('items', []):
-                rel_url = f"https://api.github.com/repos/{repo['full_name']}/releases/latest"
-                apk_data = None
-                async with session.get(rel_url) as r:
-                    if r.status = 200:
-                        assets = (await r.json()).get('assets', [])
-                        for a in assets:
-                            if a['name'].lower().endswith('.apk'):
-                                apk_data = {'url': a['browser_download_url'], 'name': a['name']}
-                                break
-                results.append({
-                    'name': repo['full_name'], 'url': repo['html_url'],
-                    'desc': repo['description'] or 'Нет описания',
-                    'stars': repo['stargazers_count'], 'lang': repo['language'] or '?',
-                    'apk': apk_data
-                })
-    return results
+## bot/keyboards/reply_kb.py
 
-async def search_apkmirror(query: str, limit: int = 6):
-    url = 'https://www.apkmirror.com/'
-    params = {'post_type': 'app_release', 'searchtype': 'apk', 's': query}
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-    results = []
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params, headers=headers) as resp:
-            if resp.status != 200: return []
-            soup = BeautifulSoup(await resp.text(), 'html.parser')
-            items = soup.select('.appRow')
-            for item in items[:limit]:
-                t = item.select_one('.appRowTitle a')
-                if t:
-                    results.append({
-                        'title': t.text.strip(),
-                        'url': 'https://www.apkmirror.com' + t['href'],
-                        'version': item.select_one('.infoSlide-value').text.strip() if item.select_one('.infoSlide-value') else '?',
-                        'size': item.select_one('.filesize').text.strip() if item.select_one('.filesize') else '?'
-                    })
-    return results
+```python
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-@dp.message_handler(commands=['start'])
-async def cmd_start(message: types.Message):
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("🔍 GitHub", callback_data="menu_git"),
-        InlineKeyboardButton("📱 APKMirror", callback_data="menu_apk")
+def get_main_keyboard() -> ReplyKeyboardMarkup:
+    buttons = [
+        [KeyboardButton(text="🔍 GitHub"), KeyboardButton(text="📱 APKMirror")],
+        [KeyboardButton(text="📁 Trashbox"), KeyboardButton(text="☀️ Погода")],
+        [KeyboardButton(text="📰 Новости"), KeyboardButton(text="ℹ️ Помощь")],
+    ]
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+def get_cancel_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отмена")]],
+        resize_keyboard=True
     )
-    kb.add(
-        InlineKeyboardButton("🌤 Погода", callback_data="menu_weather"),
-        InlineKeyboardButton("🎵 Музыка", callback_data="menu_song")
-    )
-    kb.add(
-        InlineKeyboardButton("📰 Новости", callback_data="menu_news"),
-        InlineKeyboardButton("💰 Цены", callback_data="menu_price")
+```
+
+---
+
+## bot/handlers/start.py
+
+```python
+from aiogram import Router, F
+from aiogram.types import Message
+from aiogram.filters import CommandStart, Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from bot.keyboards.reply_kb import get_main_keyboard, get_cancel_keyboard
+from bot.utils.github_api import search_github
+from bot.utils.weather_api import get_weather
+from bot.utils.apk_parser import search_apkmirror, search_trashbox
+
+router = Router()
+
+class UserState(StatesGroup):
+    waiting_github_query = State()
+    waiting_apk_query = State()
+    waiting_trashbox_query = State()
+    waiting_weather_city = State()
+    waiting_news_query = State()
+
+@router.message(CommandStart())
+async def cmd_start(message: Message):
+    await message.answer(
+        "🤖 **Github Finder**\n\nПоиск репозиториев, APK, погоды и новостей.\n\nВыберите действие 👇",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
     )
 
-    text = (
-        "🔥 <b> GitHubFinder1.1 </b> 🔥\n\n"
-        "Все команды: /commands\n\n"
-        "Выбери функцию:"
+@router.message(F.text == "ℹ️ Помощь")
+async def cmd_help(message: Message):
+    await message.answer(
+        "🔍 GitHub — поиск репозиториев\n📱 APKMirror — поиск APK\n📁 Trashbox — софт для Android\n☀️ Погода — прогноз\n📰 Новости — в разработке",
+        reply_markup=get_main_keyboard()
     )
-    await send_styled_message(message.chat.id, text, kb)
 
-@dp.message_handler(commands=['commands'])
-async def cmd_commands(message: types.Message):
-    text = (
-        "<b>Команды:</b>\n\n"
-        "/git [запрос] — GitHub\n"
-        "/apk [запрос] — APKMirror\n"
-        "/weather [город] — Погода\n"
-        "/song [трек] — Музыка\n"
-        "/news [тема] — Новости\n"
-        "/price [товар] — Цены"
-    )
-    await send_styled_message(message.chat.id, text)
+# GitHub
+@router.message(F.text == "🔍 GitHub")
+async def github_start(message: Message, state: FSMContext):
+    await message.answer("🔎 Введите запрос:", reply_markup=get_cancel_keyboard())
+    await state.set_state(UserState.waiting_github_query)
 
-@dp.callback_query_handler()
-async def callback_handler(callback: types.CallbackQuery):
-    await callback.answer()
-    user_id = callback.from_user.id
-    data = callback.data
+@router.message(UserState.waiting_github_query)
+async def github_search(message: Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=get_main_keyboard())
+        return
+    
+    results = await search_github(message.text)
+    if not results:
+        await message.answer("Ничего не найдено.", reply_markup=get_main_keyboard())
+    else:
+        text = f"🔎 **Результаты: {message.text}**\n\n"
+        for r in results:
+            text += f"📦 [{r['name']}]({r['url']})\n⭐ {r['stars']} | 📝 {r['lang']}\n{r['desc']}\n\n"
+        await message.answer(text[:4000], parse_mode="Markdown", reply_markup=get_main_keyboard())
+    await state.clear()
 
-    if data.startswith("menu_"):
-        typ = data.split("_")[1]
-        user_state[user_id] = {"type": typ, "query": "", "page": 0, "count": 3}
-        await callback.message.edit_text(f"Введи запрос для {typ.upper()}:", reply_markup=None)
-    elif data.startswith("page:"):
-        _, typ, query, page = data.split(":")
-        user_state[user_id] = {"type": typ, "query": query, "page": int(page), "count": user_state[user_id].get("count", 3)}
-        await show_results(callback.message.chat.id, user_id, callback.message.message_id)
-    elif data.startswith("count:"):
-        count = int(data.split(":")[1])
-        user_state[user_id]["count"] = count
-        user_state[user_id]["page"] = 0
-        await show_results(callback.message.chat.id, user_id, callback.message.message_id)
-    elif data.startswith("weather_region:"):
-        region = data.split(":")[1]
-        user_state[user_id] = {"type": "weather", "region": region, "query": ""}
-        await callback.message.edit_text("Введи город:")
-    elif data == "collapse_week":
-        await callback.message.edit_text("<b>Прогноз свернут</b>", reply_markup=None)
+# APKMirror
+@router.message(F.text == "📱 APKMirror")
+async def apk_start(message: Message, state: FSMContext):
+    await message.answer("📱 Введите название приложения:", reply_markup=get_cancel_keyboard())
+    await state.set_state(UserState.waiting_apk_query)
 
-@dp.message_handler(commands=['git', 'apk', 'weather', 'song', 'news', 'price'])
-async def handle_command(message: types.Message):
-    cmd = message.get_command()[1:]
-    args = message.get_args().strip()
-    if not args:
-        return await message.reply("Напиши запрос после команды.")
+@router.message(UserState.waiting_apk_query)
+async def apk_search(message: Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=get_main_keyboard())
+        return
+    
+    results = await search_apkmirror(message.text)
+    if not results:
+        await message.answer("Ничего не найдено.", reply_markup=get_main_keyboard())
+    else:
+        text = f"📱 **APKMirror: {message.text}**\n\n"
+        for r in results:
+            text += f"[{r['title']}]({r['link']})\n📄 {r['version']}\n\n"
+        await message.answer(text[:4000], parse_mode="Markdown", reply_markup=get_main_keyboard())
+    await state.clear()
 
-    user_state[message.from_user.id] = {"type": cmd, "query": args, "page": 0, "count": 3}
-    await show_results(message.chat.id, message.from_user.id)
+# Trashbox
+@router.message(F.text == "📁 Trashbox")
+async def trashbox_start(message: Message, state: FSMContext):
+    await message.answer("📁 Введите название приложения:", reply_markup=get_cancel_keyboard())
+    await state.set_state(UserState.waiting_trashbox_query)
 
-async def show_results(chat_id, user_id, msg_id=None):
-    state = user_state.get(user_id, {})
-    if not state: return
+@router.message(UserState.waiting_trashbox_query)
+async def trashbox_search(message: Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=get_main_keyboard())
+        return
+    
+    results = await search_trashbox(message.text)
+    if not results:
+        await message.answer("Ничего не найдено.", reply_markup=get_main_keyboard())
+    else:
+        text = f"📁 **Trashbox: {message.text}**\n\n"
+        for r in results:
+            text += f"[{r['title']}]({r['link']})\n📄 {r['version']}\n\n"
+        await message.answer(text[:4000], parse_mode="Markdown", reply_markup=get_main_keyboard())
+    await state.clear()
 
-    query = state["query"]
-    page = state["page"]
-    count = state["count"]
-    typ = state["type"]
+# Weather
+@router.message(F.text == "☀️ Погода")
+async def weather_start(message: Message, state: FSMContext):
+    await message.answer("☀️ Введите город:", reply_markup=get_cancel_keyboard())
+    await state.set_state(UserState.waiting_weather_city)
 
-    if typ in ["git", "apk"]:
-        if typ == "git":
-            results = await search_github(query, limit=count * 3)
-        else:
-            results = await search_apkmirror(query, limit=count * 3)
+@router.message(UserState.waiting_weather_city)
+async def weather_search(message: Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=get_main_keyboard())
+        return
+    
+    w = await get_weather(message.text)
+    if not w:
+        await message.answer("Город не найден или API ключ не задан.", reply_markup=get_main_keyboard())
+    else:
+        text = f"☀️ **{w['city']}**\n🌡 {w['temp']}°C (ощущается {w['feels']}°C)\n📝 {w['desc']}\n💧 {w['humidity']}% | 💨 {w['wind']} м/с"
+        await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    await state.clear()
 
-        start = page * count
-        items = results[start:start + count]
+# News placeholder
+@router.message(F.text == "📰 Новости")
+async def news_start(message: Message):
+    await message.answer("📰 В разработке...", reply_markup=get_main_keyboard())
+```
 
-        kb = InlineKeyboardMarkup(row_width=2)
-        if page > 0:
-            kb.add(InlineKeyboardButton("⬅️ Назад", callback_data=f"page:{typ}:{query}:{page-1}"))
-        if len(results) > start + count:
-            kb.add(InlineKeyboardButton("Вперёд ➡️", callback_data=f"page:{typ}:{query}:{page+1}"))
-        kb.add(InlineKeyboardButton("3", callback_data="count:3"), InlineKeyboardButton("5", callback_data="count:5"), InlineKeyboardButton("10", callback_data="count:10"))
+---
 
-        text = f"<b>Результаты для {query} ({len(results)})</b>\n\n"
-        for i, item in enumerate(items, start + 1):
-            title = item.get('name') or item.get('title')
-            desc = item.get('desc') or f"Версия: {item.get('version')} Размер: {item.get('size')}"
-            text += f"{i}. <b>{title}</b> - {desc}\n"
+## bot/main.py
 
-        if msg_id:
-            await bot.edit_message_text(text, chat_id, msg_id, reply_markup=kb, parse_mode=ParseMode.HTML)
-        else:
-            msg = await bot.send_message(chat_id, text, reply_markup=kb, parse_mode=ParseMode.HTML)
-            user_state[user_id]["msg_id"] = msg.message_id
+```python
+import asyncio
+import logging
+import os
+from aiohttp import web
+from aiogram import Bot, Dispatcher
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
+from bot.config import config
+from bot.handlers.start import router as start_router
 
-    elif typ == "weather":
-        # (web_search for weather)
-        text = f"<b>Погода в {query}</b>\nСегодня: 15°C, солнечно\n\n<b>На неделю (развернуть):</b>\nПн: 16°C\nВт: 17°C\nСр: 15°C\nЧт: 14°C\nПт: 13°C\nСб: 18°C\nВс: 19°C"
-        kb = InlineKeyboardMarkup()
-        kb.add(InlineKeyboardButton("Свернуть неделю", callback_data="collapse_week"))
-        await bot.send_message(chat_id, text, reply_markup=kb, parse_mode=ParseMode.HTML)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-    # (аналогично для song, news, price)
+async def health_handler(request):
+    return web.Response(text="OK")
 
-async def main():
+async def start_web_server():
     app = web.Application()
-    app.router.add_get('/', handle_ping)
+    app.add_routes([web.get("/health", health_handler), web.get("/", health_handler)])
+    port = int(os.getenv("PORT", "10000"))
     runner = web.AppRunner(app)
     await runner.setup()
-    await web.TCPSite(runner, '0.0.0.0', int(os.environ.get('PORT', 10000))).start()
-    await dp.start_polling()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"Web server started on port {port}")
+    return runner
 
-if __name__ == '__main__':
+async def main():
+    if not config.BOT_TOKEN:
+        logging.error("BOT_TOKEN не задан!")
+        return
+    
+    bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
+    dp = Dispatcher()
+    dp.include_router(start_router)
+    
+    runner = await start_web_server()
+    
+    try:
+        await asyncio.gather(
+            dp.start_polling(bot),
+        )
+    finally:
+        await runner.cleanup()
+
+if __name__ == "__main__":
     asyncio.run(main())
+```
+
+---
+
+## requirements.txt
+
+```
+aiogram>=3.10.0
+aiohttp>=3.9.0
+python-dotenv>=1.0.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+```
+
+---
+
+## Procfile
+
+```
+worker: python -m bot.main
+```
+
+---
+
+## .env
+
+```
+BOT_TOKEN=
+GITHUB_TOKEN=
+OPENWEATHER_API_KEY=
+NEWS_API_KEY=
+DEBUG=false
+PORT=10000
+```
