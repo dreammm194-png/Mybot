@@ -276,10 +276,10 @@ from aiogram.types import Message
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from keyboards.reply_kb import get_main_keyboard, get_cancel_keyboard
-from utils.github_api import search_github
-from utils.weather_api import get_weather
-from utils.apk_parser import search_apkmirror, search_trashbox
+from .keyboards.reply_kb import get_main_keyboard, get_cancel_keyboard
+from .utils.github_api import search_github
+from .utils.weather_api import get_weather
+from .utils.apk_parser import search_apkmirror, search_trashbox
 
 logger = logging.getLogger(__name__)
 router = Router()
