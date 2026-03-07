@@ -1,8 +1,7 @@
 import aiohttp
 import logging
 from typing import List, Dict
-from bot.config import config
-
+from . import config
 logger = logging.getLogger(__name__)
 
 async def search_github(query: str) -> List[Dict]:
