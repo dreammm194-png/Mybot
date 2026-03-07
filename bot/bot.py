@@ -43,7 +43,6 @@ async def search_github(query: str) -> List[Dict]:
 import aiohttp
 import logging
 from typing import Dict, Optional
-from bot.config import config
 
 logger = logging.getLogger(__name__)
 
