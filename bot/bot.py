@@ -397,7 +397,7 @@ logger = logging.getLogger(__name__)
 async def cmd_start(message: Message):
     await message.answer(
         "🤖 *Github Finder*\\n\\nПоиск репозиториев, APK, погоды и новостей.\\n\\nВыберите действие 👇",
-        parse_mode="MarkdownV2",
+        
         reply_markup=get_main_keyboard(),
     )
 
@@ -439,7 +439,7 @@ async def github_search(message: Message, state: FSMContext):
             desc = escape_markdown_v2(r.get("desc", "Нет описания"))
             text += f"📦 [{name}]({url})\\n⭐ {stars} | 📝 {lang}\\n{desc}\\n\\n"
         await message.answer(
-            text[:4000], parse_mode="MarkdownV2", reply_markup=get_main_keyboard()
+            text[:4000], reply_markup=get_main_keyboard()
         )
     await state.clear()
 
@@ -471,7 +471,7 @@ async def apk_search(message: Message, state: FSMContext):
             version = escape_markdown_v2(r.get("version", "N/A"))
             text += f"[{title}]({link})\\n📄 {version}\\n\\n"
         await message.answer(
-            text[:4000], parse_mode="MarkdownV2", reply_markup=get_main_keyboard()
+            text[:4000], reply_markup=get_main_keyboard()
         )
     await state.clear()
 
@@ -503,7 +503,7 @@ async def trashbox_search(message: Message, state: FSMContext):
             version = escape_markdown_v2(r.get("version", "N/A"))
             text += f"[{title}]({link})\\n📄 {version}\\n\\n"
         await message.answer(
-            text[:4000], parse_mode="MarkdownV2", reply_markup=get_main_keyboard()
+            text[:4000], reply_markup=get_main_keyboard()
         )
     await state.clear()
 
@@ -543,7 +543,7 @@ async def weather_search(message: Message, state: FSMContext):
             f"📝 {desc}\\n"
             f"💧 {humidity}% | 💨 {wind} м/с"
         )
-        await message.answer(text, parse_mode="MarkdownV2", reply_markup=get_main_keyboard())
+        await message.answer(text, reply_markup=get_main_keyboard())
     await state.clear()
 
 
@@ -606,7 +606,7 @@ async def news_category_handler(message: Message, state: FSMContext):
     
     await message.answer(
         text[:4000],
-        parse_mode="MarkdownV2",
+        
         reply_markup=get_main_keyboard()
     )
     await state.clear()
@@ -639,7 +639,7 @@ async def news_query_handler(message: Message, state: FSMContext):
     
     await message.answer(
         text[:4000],
-        parse_mode="MarkdownV2",
+        
         reply_markup=get_main_keyboard()
     )
     await state.clear()
